@@ -1,6 +1,10 @@
 import React from 'react';
+import { useDashboard } from '../context/DashboardContext';
 
-const Footer = ({ contactInfo = {} }) => {
+const Footer = () => {
+  const { componentData } = useDashboard();
+  const contactInfo = componentData.footer;
+
   const defaultContact = {
     email: "info@example.com",
     phone: "+1 (555) 123-4567",

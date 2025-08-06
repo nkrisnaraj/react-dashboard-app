@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import { useDashboard } from '../context/DashboardContext';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const Dashboard = () => {
+    const { 
+        componentData, 
+        loading: contextLoading, 
+        saveData, 
+        navigateTo,
+        loadInitialData 
+    } = useDashboard();
 
-const Dashboard = ({onUpdate, onNavigate}) => {
     const [formData, setFormData] = useState({
         header:{
             title: '',
@@ -24,60 +30,23 @@ const Dashboard = ({onUpdate, onNavigate}) => {
     });
     const [uploading, setUploading] = useState(false);
     const [imagePreview, setImagePreview] = useState('');
-    const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
-    // Load data from backend on component mount
+    // Load data from context on component mount
     useEffect(() => {
-        loadDataFromBackend();
-    }, []);
-
-    const loadDataFromBackend = async () => {
-        try {
-            setLoading(true);
-            const response = await axios.get(`${API_BASE_URL}/components`);
-            const data = response.data;
-            
+        if (componentData) {
             setFormData({
-                header: data.header || { title: '', imageUrl: '' },
-                navbar: data.navbar || { links: [
+                header: componentData.header || { title: '', imageUrl: '' },
+                navbar: componentData.navbar || { links: [
                     {label: '', url: ''},
                     {label: '', url: ''},
                     {label: '', url: ''}
                 ]},
-                footer: data.footer || { email: '', phone: '', address: '' }
+                footer: componentData.footer || { email: '', phone: '', address: '' }
             });
-            
-            if (data.header?.imageUrl) {
-                setImagePreview(data.header.imageUrl);
-            }
-            
-            onUpdate(data);
-        } catch (error) {
-            console.error('Error loading data from backend:', error);
-            // Fall back to localStorage if backend fails
-            loadFromLocalStorage();
-        } finally {
-            setLoading(false);
+            setImagePreview(componentData.header?.imageUrl || '');
         }
-    };
-
-    const saveDataToBackend = async (dataToSave) => {
-        try {
-            setSaving(true);
-            const response = await axios.post(`${API_BASE_URL}/components`, dataToSave);
-            
-            if (response.data.success) {
-                console.log('Data saved to backend successfully');
-                return true;
-            }
-        } catch (error) {
-            console.error('Error saving data to backend:', error);
-            throw error;
-        } finally {
-            setSaving(false);
-        }
-    };
+    }, [componentData]);
 
     const handleInputChange = (section, field, value, index = null) => {
         setFormData(prev =>{
@@ -96,40 +65,41 @@ const Dashboard = ({onUpdate, onNavigate}) => {
         const file = event.target.files[0];
         if (!file) return;
 
-        // Validate file type
-        if (!file.type.startsWith('image/')) {
-            alert('Please select a valid image file.');
+        // File validation
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+        const maxSize = 5 * 1024 * 1024; // 5MB
+
+        if (!allowedTypes.includes(file.type)) {
+            alert('Please select a valid image file (JPG, PNG, or GIF).');
             return;
         }
 
-        // Validate file size (max 5MB)
-        const maxSizeInMB = 5;
-        if (file.size > maxSizeInMB * 1024 * 1024) {
-            alert(`File size must be less than ${maxSizeInMB}MB.`);
+        if (file.size > maxSize) {
+            alert('Image size must be less than 5MB.');
             return;
         }
-
-        // Show preview immediately
-        const reader = new FileReader();
-        reader.onloadend = (e) => setImagePreview(e.target.result);
-        reader.readAsDataURL(file); 
-
-        setUploading(true);
-        
-        const uploadFormData = new FormData();
-        uploadFormData.append('file', file);
-        uploadFormData.append('upload_preset', import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET);
-        uploadFormData.append('cloud_name', import.meta.env.VITE_CLOUDINARY_CLOUD_NAME);
 
         try {
-            const response = await axios.post(
-                `https://api.cloudinary.com/v1_1/${import.meta.env.VITE_CLOUDINARY_CLOUD_NAME}/image/upload`, 
-                uploadFormData
-            );
-            const imageUrl = response.data.secure_url;
-            handleInputChange('header', 'imageUrl', imageUrl);
-            setImagePreview(imageUrl);
-            console.log('Image uploaded successfully:', imageUrl);
+            setUploading(true);
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET);
+            
+            const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+            const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.secure_url) {
+                setImagePreview(data.secure_url);
+                handleInputChange('header', 'imageUrl', data.secure_url);
+            } else {
+                throw new Error('Upload failed');
+            }
         } catch (error) {
             console.error("Error uploading image:", error);
             alert("Failed to upload image. Please try again.");
@@ -193,26 +163,28 @@ const Dashboard = ({onUpdate, onNavigate}) => {
         }
         
         try {
-            // Save to backend first
-            await saveDataToBackend(formData);
+            setSaving(true);
+            // Save using context
+            const result = await saveData(formData);
             
-            // Update parent component
-            onUpdate(formData);
+            if (result.success) {
+                // Also save to localStorage for backup
+                localStorage.setItem('dashboardData', JSON.stringify(formData));
+                alert("Dashboard settings updated and saved successfully!");
+                navigateTo('home');
+            } else {
+                throw new Error(result.error);
+            }
+        } catch (error) {
+            console.error('Error saving data:', error);
             
             // Save to localStorage as backup
             localStorage.setItem('dashboardData', JSON.stringify(formData));
             
-            alert("Dashboard settings updated and saved successfully!");
-            if (onNavigate) onNavigate('home');
-        } catch (error) {
-            console.error('Error saving data:', error);
-            
-            // If backend fails, still update local state and localStorage
-            onUpdate(formData);
-            localStorage.setItem('dashboardData', JSON.stringify(formData));
-            
             alert("Dashboard settings updated locally. Backend save failed - please check your connection.");
-            if (onNavigate) onNavigate('home');
+            navigateTo('home');
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -224,16 +196,13 @@ const Dashboard = ({onUpdate, onNavigate}) => {
             if (data.header.imageUrl) {
                 setImagePreview(data.header.imageUrl);
             }
-            onUpdate(data);
             alert("Data loaded from local storage!");
         } else {
             alert("No saved data found in local storage.");
         }
     };
 
-
-
-    if (loading) {
+    if (contextLoading) {
         return (
             <div className="bg-gray-100 min-h-screen flex items-center justify-center">
                 <div className="text-center">
@@ -246,211 +215,212 @@ const Dashboard = ({onUpdate, onNavigate}) => {
 
     return(
         <div className="bg-gray-100 min-h-screen py-8">
-      <div className="container mx-auto px-4">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 space-y-4 md:space-y-0">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
-              <p className="text-gray-600 mt-1">Manage your website content dynamically</p>
-            </div>
-            <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
-              <button
-                onClick={() => onNavigate && onNavigate('home')}
-                type="button"
-                className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm"
-              >
-                ← Back to Website
-              </button>
-              <button
-                onClick={loadFromLocalStorage}
-                type="button"
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm"
-              >
-                Load Local Data
-              </button>
-        
-            </div>
-          </div>
-          
-          {/* Instructions */}
-          <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-blue-700">
-                  Use this dashboard to update your website content in real-time. Changes are saved to the database and localStorage for backup.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-8">
-            {/* Header Section */}
-            <div className="border-b pb-8">
-              <h2 className="text-2xl font-semibold mb-6 text-gray-700">Header Settings</h2>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="container mx-auto px-4">
+            <div className="bg-white rounded-lg shadow-lg p-8">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 space-y-4 md:space-y-0">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Title
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.header.title}
-                    onChange={(e) => handleInputChange('header', 'title', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter header title"
-                  />
+                  <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
+                  <p className="text-gray-600 mt-1">Manage your website content dynamically</p>
+                </div>
+                <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
+                  <button
+                    onClick={() => navigateTo('home')}
+                    type="button"
+                    className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                  >
+                    ← Back to Website
+                  </button>
+                  <button
+                    onClick={loadFromLocalStorage}
+                    type="button"
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                  >
+                    💾 Load Local Data
+                  </button>
+                </div>
+              </div>
+              
+              {/* Instructions */}
+              <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8">
+                <div className="flex">
+                  <div>
+                    <h3 className="text-blue-800 font-medium">How to use this Dashboard:</h3>
+                    <p className="text-blue-700 text-sm mt-1">
+                      Edit the content below and click "Update Content" to save changes to your website. 
+                      Use "Load Local Data" to restore previously saved data from your browser.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-8">
+                {/* Header Section */}
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h2 className="text-xl font-semibold mb-4 text-gray-800">Header Section</h2>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label htmlFor="headerTitle" className="block text-sm font-medium text-gray-700 mb-2">
+                        Website Title *
+                      </label>
+                      <input
+                        type="text"
+                        id="headerTitle"
+                        value={formData.header.title}
+                        onChange={(e) => handleInputChange('header', 'title', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Enter your website title"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="headerImage" className="block text-sm font-medium text-gray-700 mb-2">
+                        Header Image
+                      </label>
+                      <input
+                        type="file"
+                        id="headerImage"
+                        accept="image/jpeg,image/png,image/gif"
+                        onChange={handleImageUpload}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        disabled={uploading}
+                      />
+                      <p className="text-sm text-gray-500 mt-1">
+                        Upload a header image (JPG, PNG, or GIF - max 5MB)
+                      </p>
+
+                      {uploading && (
+                        <div className="mt-3 text-blue-600 flex items-center">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                          Uploading image...
+                        </div>
+                      )}
+
+                      {imagePreview && (
+                        <div className="mt-3">
+                          <p className="text-sm font-medium text-gray-700 mb-2">Image Preview:</p>
+                          <img 
+                            src={imagePreview} 
+                            alt="Header preview" 
+                            className="w-32 h-32 object-cover rounded-lg border-2 border-gray-200"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Header Image
-                  </label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    disabled={uploading}
-                  />
-                  {uploading && (
-                    <div className="flex items-center mt-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                      <p className="text-blue-600 text-sm">Uploading image...</p>
-                    </div>
-                  )}
-                  {imagePreview && (
-                    <div className="mt-4">
-                      <p className="text-sm text-gray-600 mb-2">Image Preview:</p>
-                      <div className="relative inline-block">
-                        <img
-                          src={imagePreview}
-                          alt="Preview"
-                          className="w-32 h-32 object-cover rounded-lg border shadow-sm"
+                {/* Navbar Section */}
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h2 className="text-xl font-semibold mb-4 text-gray-800">Navigation Menu</h2>
+                  
+                  {formData.navbar.links.map((link, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label htmlFor={`navLabel${index}`} className="block text-sm font-medium text-gray-700 mb-2">
+                          Link {index + 1} Label *
+                        </label>
+                        <input
+                          type="text"
+                          id={`navLabel${index}`}
+                          value={link.label}
+                          onChange={(e) => handleInputChange('navbar', 'label', e.target.value, index)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                          placeholder={`Link ${index + 1} text`}
+                          required
                         />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setImagePreview('');
-                            handleInputChange('header', 'imageUrl', '');
-                          }}
-                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                        >
-                          ×
-                        </button>
+                      </div>
+                      
+                      <div>
+                        <label htmlFor={`navUrl${index}`} className="block text-sm font-medium text-gray-700 mb-2">
+                          Link {index + 1} Path/URL *
+                        </label>
+                        <input
+                          type="text"
+                          id={`navUrl${index}`}
+                          value={link.url}
+                          onChange={(e) => handleInputChange('navbar', 'url', e.target.value, index)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                          placeholder="e.g., /about or https://example.com"
+                          required
+                        />
                       </div>
                     </div>
-                  )}
-                  <p className="text-xs text-gray-500 mt-1">
-                    Supported formats: JPG, PNG, GIF. Max size: 5MB
+                  ))}
+                  
+                  <p className="text-sm text-gray-500 mt-2">
+                    Enter paths (e.g., /about, #contact) or full URLs (e.g., https://example.com)
                   </p>
                 </div>
-              </div>
-            </div>
 
-            {/* Navbar Section */}
-            <div className="border-b pb-8">
-              <h2 className="text-2xl font-semibold mb-6 text-gray-700">Navigation Settings</h2>
-              
-              {formData.navbar.links.map((link, index) => (
-                <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Link {index + 1} Label
-                    </label>
-                    <input
-                      type="text"
-                      value={link.label}
-                      onChange={(e) => handleInputChange('navbar', 'label', e.target.value, index)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder={`Enter link ${index + 1} label`}
-                    />
-                  </div>
+                {/* Footer Section */}
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h2 className="text-xl font-semibold mb-4 text-gray-800">Footer Contact Information</h2>
                   
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Link {index + 1} URL/Path
-                    </label>
-                    <input
-                      type="text"
-                      value={link.url}
-                      onChange={(e) => handleInputChange('navbar', 'url', e.target.value, index)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder={`e.g., /about, /contact, or https://example.com`}
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label htmlFor="footerEmail" className="block text-sm font-medium text-gray-700 mb-2">
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        id="footerEmail"
+                        value={formData.footer.email}
+                        onChange={(e) => handleInputChange('footer', 'email', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="your.email@example.com"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="footerPhone" className="block text-sm font-medium text-gray-700 mb-2">
+                        Phone Number *
+                      </label>
+                      <input
+                        type="tel"
+                        id="footerPhone"
+                        value={formData.footer.phone}
+                        onChange={(e) => handleInputChange('footer', 'phone', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="(555) 123-4567"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="footerAddress" className="block text-sm font-medium text-gray-700 mb-2">
+                        Address *
+                      </label>
+                      <input
+                        type="text"
+                        id="footerAddress"
+                        value={formData.footer.address}
+                        onChange={(e) => handleInputChange('footer', 'address', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="123 Main St, City, State"
+                        required
+                      />
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
 
-            {/* Footer Section */}
-            <div className="pb-8">
-              <h2 className="text-2xl font-semibold mb-6 text-gray-700">Footer Settings</h2>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.footer.email}
-                    onChange={(e) => handleInputChange('footer', 'email', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter email address"
-                  />
+                {/* Submit Button */}
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={uploading || saving}
+                    className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 focus:ring-blue-500 focus:ring-offset-2 focus:ring-2 focus:outline-none transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {saving ? 'Saving...' : 'Update Content'}
+                  </button>
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={formData.footer.phone}
-                    onChange={(e) => handleInputChange('footer', 'phone', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter phone number"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Address
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.footer.address}
-                    onChange={(e) => handleInputChange('footer', 'address', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter address"
-                  />
-                </div>
-              </div>
+              </form>
             </div>
-
-            <div className="text-center">
-              <button
-                type="submit"
-                disabled={saving}
-                className={`px-8 py-3 rounded-lg font-medium text-lg transition-colors ${
-                  saving 
-                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                }`}
-              >
-                {saving ? 'Saving...' : 'Update Content'}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
-      </div>
-    </div>
     );
 };
+
 export default Dashboard;

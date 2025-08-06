@@ -8,9 +8,10 @@ A dynamic React dashboard application with Tailwind CSS styling, Cloudinary imag
 - **Cloudinary Integration**: Upload and manage images with preview functionality
 - **MongoDB Atlas**: Cloud database storage for persistent data
 - **Responsive Design**: Mobile-friendly interface using Tailwind CSS
-- **Local Storage Backup**: Data persistence even when backend is offline
+**Local Storage Backup**: Manually restore previously saved dashboard data from your browser using the "Load Local Data" button
 - **Form Validation**: Input validation for all form fields
 - **Loading States**: User-friendly loading indicators
+- **Global State Management**: React Context API eliminates prop drilling and centralizes state
 
 ## 🛠️ Technology Stack
 
@@ -99,7 +100,8 @@ npm run dev
 
 4. **Data Persistence**:
    - Data saves to MongoDB Atlas when "Update Content" is clicked
-   - Local storage backup for offline functionality
+   - You can manually restore your last saved dashboard data from your browser using the "Load Local Data" button in the dashboard
+   - No automatic draft saving; only explicit saves and manual loads
    - "Refresh from Server" to reload latest data
 
 ## 🗂️ Project Structure
@@ -116,6 +118,8 @@ react-dashboard-app/
 │   │   │   ├── Header.jsx
 │   │   │   ├── Navbar.jsx
 │   │   │   └── Footer.jsx
+│   │   ├── context/
+│   │   │   └── DashboardContext.jsx  # Global state management
 │   │   ├── App.jsx
 │   │   ├── main.jsx
 │   │   └── index.css
@@ -172,6 +176,15 @@ react-dashboard-app/
 - Image upload with preview
 - Real-time validation
 - Loading states and error handling
+- Connected to global state via React Context
+
+## 🎯 State Management
+
+### React Context Implementation
+- **DashboardContext**: Centralized state management for all component data
+- **Eliminates Prop Drilling**: Components access state directly from context
+- **Global State Updates**: Changes in one component automatically reflect across the app
+- **Optimized Re-renders**: Context providers minimize unnecessary re-renders
 
 ## 🔒 Security Features
 

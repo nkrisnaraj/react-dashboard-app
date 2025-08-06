@@ -1,6 +1,10 @@
 import React from 'react';
+import { useDashboard } from '../context/DashboardContext';
 
-const Navbar = ({ links = [] }) => {
+const Navbar = () => {
+  const { componentData } = useDashboard();
+  const { links } = componentData.navbar;
+
   const defaultLinks = [
     { label: "Home", url: "/" },
     { label: "About", url: "/about" },
